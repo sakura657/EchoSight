@@ -1,0 +1,57 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xccheckout
+*.xcuserdatad/
+*.xcscmblueprint
+*.xccovarchive
+*.xccovreport
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# Secrets
+EchoSight/Secrets.plist
+*.env
+.env
+.env.*
+
+# CoreML / model weights / large binaries
+EchoSight/FastViTMA36F16.mlpackage/Data/com.apple.CoreML/weights/
+EchoSight/FastViTMA36F16.mlpackage/Data/com.apple.CoreML/model.mlmodel
+*.mlmodelc/
+*.mlpackage/**/weights/*
+*.mlpackage/**/Data/**/weights/*
+*.bin
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.ckpt
+
+# User-specific and logs
+*.log
+.DS_Store
+
+# SwiftPM
+.build/
+.swiftpm/
+
+# CocoaPods / Carthage / Fastlane
+Pods/
+Carthage/Build/
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**
+
+# App artifacts
+*.ipa
+*.dSYM
+*.dSYM.zip
