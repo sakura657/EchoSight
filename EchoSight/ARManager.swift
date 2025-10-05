@@ -49,6 +49,11 @@ class ARManager: NSObject, ARSessionDelegate, ObservableObject {
     override init() {
         super.init()
         arView.session.delegate = self
+        
+        // Configure ARView for better performance
+        arView.automaticallyConfigureSession = false
+        arView.environment.lighting.intensityExponent = 1.0
+        
         setupVision()
         print("FastViT throttled: every \(visionProcessInterval)s to reduce CPU and avoid speech impact")
     }
@@ -132,7 +137,7 @@ class ARManager: NSObject, ARSessionDelegate, ObservableObject {
         frameSkipCounter += 1
         
         let now = Date()
-        let shouldProcessByTime = lastVisionProcessTime == nil || 
+        let shouldProcessByTime = lastVisionProcessTime == nil ||
                                   now.timeIntervalSince(lastVisionProcessTime!) >= visionProcessInterval
         let shouldProcessByFrame = frameSkipCounter >= frameSkipThreshold
         
@@ -169,11 +174,15 @@ class ARManager: NSObject, ARSessionDelegate, ObservableObject {
     }
     
     /// Start AR session with LiDAR scene reconstruction
-    func startSession() {
+    func startSession(resetTracking: Bool = true) {
         guard ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) else {
             print("Device does not support LiDAR mesh reconstruction")
             return
         }
+        
+        // Stop existing timer first
+        timer?.invalidate()
+        timer = nil
         
         let configuration = ARWorldTrackingConfiguration()
         configuration.sceneReconstruction = .mesh
@@ -187,12 +196,17 @@ class ARManager: NSObject, ARSessionDelegate, ObservableObject {
             configuration.frameSemantics.insert(.sceneDepth)
         }
         
-        // Run session and reset tracking
-        arView.session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
-        print("AR session started: mesh + plane detection + depth")
+        // Configure ARView for better rendering
+        arView.renderOptions = [.disablePersonOcclusion, .disableDepthOfField, .disableMotionBlur]
+        arView.environment.lighting.intensityExponent = 1.0
+        
+        // Run session with optional reset
+        let options: ARSession.RunOptions = resetTracking ? [.resetTracking, .removeExistingAnchors] : []
+        arView.session.run(configuration, options: options)
+        print("AR session started: mesh + plane detection + depth (reset: \(resetTracking))")
         
         DispatchQueue.main.async {
-            self.timer = Timer.scheduledTimer(timeInterval: 0.2, target: self, selector: #selector(self.performMultiRaycast), userInfo: nil, repeats: true)
+            self.timer = Timer.scheduledTimer(timeInterval: 0.5, target: self, selector: #selector(self.performMultiRaycast), userInfo: nil, repeats: true)
         }
     }
     
@@ -201,10 +215,28 @@ class ARManager: NSObject, ARSessionDelegate, ObservableObject {
         timer?.invalidate()
         timer = nil
         
-        // Pause AR session
+        // Stop AR session completely
         arView.session.pause()
         
-        print("AR session paused")
+        // Reset tracking state
+        DispatchQueue.main.async {
+            self.isTrackingNormal = false
+        }
+        
+        print("AR session stopped")
+    }
+    
+    /// Check if AR session is running
+    var isSessionRunning: Bool {
+        return isTrackingNormal
+    }
+    
+    /// Resume AR session if it's paused
+    func resumeSession() {
+        if !isTrackingNormal {
+            print("Resuming paused AR session...")
+            startSession(resetTracking: false)
+        }
     }
     
     /// Monitor AR tracking state

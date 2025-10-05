@@ -74,7 +74,41 @@ class VLMService {
         sendVLMRequest(prompt: prompt, base64Image: base64Image, completion: completion)
     }
     
-    /// Handle natural language query with image context
+    /// Handle navigation query with image context
+    func handleNavigationQuery(query: String, image: UIImage, completion: @escaping (Result<String, Error>) -> Void) {
+        
+        guard let base64Image = compressAndEncodeImage(image) else {
+            completion(.failure(NSError(domain: "VLMService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode image"])))
+            return
+        }
+        
+        let prompt = """
+        你是一个盲人导航助手。用户问题："\(query)"
+        请基于图像提供导航和避障建议，回答要简洁明了，最多10个词。
+        重点关注：路径安全、障碍物位置、行走方向建议。
+        """
+        
+        sendVLMRequest(prompt: prompt, base64Image: base64Image, completion: completion)
+    }
+    
+    /// Handle object recognition query with image context
+    func handleObjectRecognitionQuery(query: String, image: UIImage, completion: @escaping (Result<String, Error>) -> Void) {
+        
+        guard let base64Image = compressAndEncodeImage(image) else {
+            completion(.failure(NSError(domain: "VLMService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode image"])))
+            return
+        }
+        
+        let prompt = """
+        你是一个盲人室内物体识别助手。用户问题："\(query)"
+        请详细描述图像中的物体、位置、用途和特征，帮助盲人理解周围环境。
+        回答要详细但简洁，最多20个词。
+        """
+        
+        sendVLMRequest(prompt: prompt, base64Image: base64Image, completion: completion)
+    }
+    
+    /// Handle natural language query with image context (legacy method)
     func handleNaturalLanguageQuery(query: String, image: UIImage, completion: @escaping (Result<String, Error>) -> Void) {
         
         guard let base64Image = compressAndEncodeImage(image) else {
