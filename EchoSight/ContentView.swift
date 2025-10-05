@@ -38,6 +38,8 @@ struct ContentView: View {
     @State private var showVLMResponse = false
     @State private var isProcessingVLM = false
     @State private var hasTriggeredVLMForCurrentWarning = false
+    @State private var isSpeakingVLMResponse = false  // Track if currently speaking VLM response
+    @State private var isSpeakingObjectName = false   // Track if currently speaking object info
     
     // Warning cooldown
     @State private var lastWarningTime: Date?
@@ -284,6 +286,9 @@ struct ContentView: View {
         
         // Playback session switching removed to avoid audio session churn
         
+        // Mark that we are speaking object info now
+        isSpeakingObjectName = true
+        
         speechSynthesizer.speak(utterance)
     }
 
@@ -322,8 +327,31 @@ struct ContentView: View {
         delegate.onStartSpeaking = { [weak speechRecognition] in
             speechRecognition?.pauseListening()
         }
-        delegate.onFinishSpeaking = { [weak speechRecognition] in
-            speechRecognition?.resumeListening()
+        delegate.onFinishSpeaking = {
+            // Resume ASR after any speech finishes
+            self.speechRecognition.resumeListening()
+            // If the last utterance was object info, clear history after 2 seconds
+            if self.isSpeakingObjectName {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    if self.isSpeakingObjectName {
+                        withAnimation {
+                            self.arManager.objectHistory.removeAll()
+                            self.isSpeakingObjectName = false
+                        }
+                    }
+                }
+            }
+        }
+        delegate.onFinishVLMSpeaking = {
+            // Close the VLM response UI 1 second after speech finishes
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                if self.isSpeakingVLMResponse {
+                    withAnimation {
+                        self.showVLMResponse = false
+                        self.isSpeakingVLMResponse = false
+                    }
+                }
+            }
         }
         speechDelegate = delegate
         speechSynthesizer.delegate = delegate
@@ -378,14 +406,8 @@ struct ContentView: View {
                 case .success(let response):
                     self.vlmResponse = response
                     self.showVLMResponse = true
-                    self.speakText(response)
-                    
-                    // Auto hide after 15s
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
-                        withAnimation {
-                            self.showVLMResponse = false
-                        }
-                    }
+                    self.isSpeakingVLMResponse = true
+                    self.speakVLMText(response)
                     
                 case .failure(let error):
                     print("VLM request failed: \(error.localizedDescription)")
@@ -414,14 +436,8 @@ struct ContentView: View {
                 case .success(let advice):
                     self.vlmResponse = advice
                     self.showVLMResponse = true
-                    self.speakText(advice)
-                    
-                    // Auto hide after 10s
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-                        withAnimation {
-                            self.showVLMResponse = false
-                        }
-                    }
+                    self.isSpeakingVLMResponse = true
+                    self.speakVLMText(advice)
                     
                 case .failure(let error):
                     print("VLM advice request failed: \(error.localizedDescription)")
@@ -438,6 +454,19 @@ struct ContentView: View {
         configureNaturalVoice(utterance: utterance)
         
         // Playback session switching removed to avoid audio session churn
+        
+        speechSynthesizer.speak(utterance)
+    }
+    
+    /// Speak VLM response text (will auto-close UI after speech finishes)
+    private func speakVLMText(_ text: String) {
+        let utterance = AVSpeechUtterance(string: text)
+        
+        // Natural voice parameters
+        configureNaturalVoice(utterance: utterance)
+        
+        // Tag this utterance as VLM response for delegate handling
+        utterance.voice = AVSpeechSynthesisVoice(identifier: "com.apple.voice.enhanced.en-US.Allison")
         
         speechSynthesizer.speak(utterance)
     }
@@ -462,9 +491,17 @@ struct ContentView: View {
 class SpeechSynthesizerDelegate: NSObject, AVSpeechSynthesizerDelegate {
     var onStartSpeaking: (() -> Void)?
     var onFinishSpeaking: (() -> Void)?
+    var onFinishVLMSpeaking: (() -> Void)?
+    
+    private var isVLMUtterance = false
     
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
         print("Speech started; pause ASR and switch to playback")
+        
+        // Check if this is a VLM response (longer text, typically > 10 words)
+        let wordCount = utterance.speechString.split(separator: " ").count
+        isVLMUtterance = wordCount > 5  // VLM responses are usually longer
+        
         DispatchQueue.main.async {
             self.onStartSpeaking?()
         }
@@ -474,6 +511,12 @@ class SpeechSynthesizerDelegate: NSObject, AVSpeechSynthesizerDelegate {
         print("Speech finished; resume listening")
         DispatchQueue.main.async {
             self.onFinishSpeaking?()
+            
+            // If this was a VLM response, trigger VLM-specific callback
+            if self.isVLMUtterance {
+                self.onFinishVLMSpeaking?()
+                self.isVLMUtterance = false
+            }
         }
     }
     
@@ -481,6 +524,7 @@ class SpeechSynthesizerDelegate: NSObject, AVSpeechSynthesizerDelegate {
         print("Speech cancelled; resume listening")
         DispatchQueue.main.async {
             self.onFinishSpeaking?()
+            self.isVLMUtterance = false
         }
     }
 }

@@ -37,14 +37,14 @@ class ARManager: NSObject, ARSessionDelegate, ObservableObject {
     
     // Limit FastViT frequency to avoid impacting speech recognition
     private var lastVisionProcessTime: Date?
-    private let visionProcessInterval: TimeInterval = 0.5 // run every 0.5s
+    private let visionProcessInterval: TimeInterval = 1.0 // run every 1.0s
     private var frameSkipCounter = 0
-    private let frameSkipThreshold = 30 // process every 30 frames
+    private let frameSkipThreshold = 60 // process every 60 frames
     
     // Prevent ARFrame retention and overwork by limiting image updates
     private var isProcessingFrameImage = false
     private var lastImageUpdateTime: Date?
-    private let imageUpdateInterval: TimeInterval = 0.3
+    private let imageUpdateInterval: TimeInterval = 0.5
 
     override init() {
         super.init()

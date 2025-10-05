@@ -163,7 +163,7 @@ class SpeechRecognitionService: ObservableObject {
             if !audioSessionConfigured {
                 try audioSession.setCategory(.playAndRecord,
                                             mode: .voiceChat,
-                                            options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])
+                                            options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP, .mixWithOthers])
                 try audioSession.setPreferredInputNumberOfChannels(1)
                 try audioSession.setPreferredIOBufferDuration(0.02)
                 try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
@@ -256,12 +256,12 @@ class SpeechRecognitionService: ObservableObject {
             }
         }
         
-        // Use output format from audio engine for tap
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        // Use hardware input format to avoid format mismatch when installing tap
+        let recordingFormat = inputNode.inputFormat(forBus: 0)
         
-        // Validate format
+        // Validate basic properties
         guard recordingFormat.sampleRate > 0 && recordingFormat.channelCount > 0 else {
-            print("Invalid audio format: sampleRate=\(recordingFormat.sampleRate), channels=\(recordingFormat.channelCount)")
+            print("Invalid audio format detected, aborting session")
             isStarting = false
             return
         }
@@ -273,7 +273,7 @@ class SpeechRecognitionService: ObservableObject {
             inputNode.removeTap(onBus: 0)
         }
         
-        // Install tap with explicit format to avoid zero-sized buffers
+        // Install tap with hardware (input) format to match the microphone stream
         inputNode.installTap(onBus: 0, bufferSize: 2048, format: recordingFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
             
@@ -309,6 +309,7 @@ class SpeechRecognitionService: ObservableObject {
         silenceTimer?.invalidate()
         silenceTimer = nil
         
+        // Safely remove tap before stopping engine
         let inputNode = audioEngine.inputNode
         if inputNode.numberOfInputs > 0 {
             inputNode.removeTap(onBus: 0)
@@ -320,6 +321,9 @@ class SpeechRecognitionService: ObservableObject {
         if audioEngine.isRunning {
             audioEngine.stop()
         }
+        
+        // Reset audio engine to prevent format mismatch on restart
+        audioEngine.reset()
         
         // Prefer finishing the task over cancel to reduce spurious errors
         recognitionTask?.finish()
@@ -337,7 +341,10 @@ class SpeechRecognitionService: ObservableObject {
         // Ignore during pause
         guard !isPaused else {
             print("Paused; ignore result")
-            currentTranscription = ""
+            // Clear transcription after 10 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                self.currentTranscription = ""
+            }
             return
         }
         
