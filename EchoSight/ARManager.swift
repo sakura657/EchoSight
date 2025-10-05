@@ -74,21 +74,19 @@ class ARManager: NSObject, ARSessionDelegate, ObservableObject {
     private func processVisionClassificationResults(_ results: [VNClassificationObservation]) {
         if let topResult = results.first {
             if topResult.confidence > 0.6 {
-                let identifier = topResult.identifier
+                let fullIdentifier = topResult.identifier
                 
-                // Update history array; insert only if different from latest
-                if self.objectHistory.first != identifier {
-                    // Insert new result at the start
-                    self.objectHistory.insert(identifier, at: 0)
-                    
-                    // Remove the oldest when exceeding max
-                    if self.objectHistory.count > self.maxHistoryCount {
-                        self.objectHistory.removeLast()
-                    }
-                    
-                    print("FastViT: \(identifier) (conf: \(String(format: "%.2f", topResult.confidence)))")
-                }
+                // Extract only the first word before comma (highest confidence result)
+                let identifier = fullIdentifier.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? fullIdentifier
+                
+                self.objectHistory = [identifier]
+                
+                print("FastViT: \(identifier) (conf: \(String(format: "%.2f", topResult.confidence)))")
+            } else {
+                self.objectHistory = []
             }
+        } else {
+            self.objectHistory = []
         }
     }
 

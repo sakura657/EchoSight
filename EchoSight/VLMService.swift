@@ -16,7 +16,7 @@ class VLMService {
         return Config.openRouterAPIKey ?? ""
     }
     private let baseURL = "https://openrouter.ai/api/v1"
-    private let model = "google/gemini-2.0-flash-exp:free"
+    private let model = "google/gemini-2.5-flash-lite-preview-09-2025"
     
     private init() {}
     

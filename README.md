@@ -68,7 +68,7 @@ The app reads `OPENROUTER_API_KEY` from `Secrets.plist`, Info.plist, or environm
 
 ## Notes
 - Whisper-based services have been removed. Apple Speech is used for ASR.
-- The VLM client uses OpenRouter with `google/gemini-2.0-flash-exp:free` by default. You can change the model in `VLMService.swift`.
+- The VLM client uses OpenRouter with `google/gemini-2.5-flash-lite-preview-09-2025` by default. You can change the model in `VLMService.swift`.
 
 ## License
 MIT — see `LICENSE`.
