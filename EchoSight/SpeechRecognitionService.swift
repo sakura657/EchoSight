@@ -277,11 +277,17 @@ class SpeechRecognitionService: ObservableObject {
         inputNode.installTap(onBus: 0, bufferSize: 2048, format: recordingFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
             
-            // Drop a few initial empty buffers during mic warm-up
+            // Drop empty or invalid buffers
             if buffer.frameLength == 0 {
                 if self.droppedSilentBuffers < self.maxDroppedSilentBuffers {
                     self.droppedSilentBuffers += 1
                 }
+                return
+            }
+            
+            // Additional validation: check if buffer has valid data
+            guard buffer.floatChannelData != nil,
+                  buffer.format.channelCount > 0 else {
                 return
             }
             

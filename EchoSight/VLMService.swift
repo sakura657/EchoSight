@@ -90,6 +90,22 @@ class VLMService {
         sendVLMRequest(prompt: prompt, base64Image: base64Image, completion: completion)
     }
     
+    /// Describe the environment in the image for voice interaction mode
+    func describeEnvironment(image: UIImage, completion: @escaping (Result<String, Error>) -> Void) {
+        
+        guard let base64Image = compressAndEncodeImage(image) else {
+            completion(.failure(NSError(domain: "VLMService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode image"])))
+            return
+        }
+        
+        let prompt = """
+        You are a helpful assistant for a blind person. Describe the environment in this image briefly.
+        Focus on key objects, layout, and important details. Keep it under 20 words.
+        """
+        
+        sendVLMRequest(prompt: prompt, base64Image: base64Image, completion: completion)
+    }
+    
     /// Send a VLM request to OpenRouter API
     private func sendVLMRequest(prompt: String, base64Image: String, completion: @escaping (Result<String, Error>) -> Void) {
         

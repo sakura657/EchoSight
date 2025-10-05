@@ -41,9 +41,14 @@ struct ContentView: View {
     @State private var isSpeakingVLMResponse = false  // Track if currently speaking VLM response
     @State private var isSpeakingObjectName = false   // Track if currently speaking object info
     
-    // Warning cooldown
+    // Warning cooldown - shorter for more frequent haptic feedback
     @State private var lastWarningTime: Date?
-    private let warningCooldown: TimeInterval = 3.0  // cooldown seconds
+    private let warningCooldown: TimeInterval = 1.5  // Reduced from 3.0 to 1.5 seconds for more responsive haptics
+    
+    // MARK: - Mode Management
+    // Two modes: obstacle avoidance (true) and voice interaction (false)
+    @State private var isObstacleMode = true
+    @State private var hasDescribedEnvironmentInVoiceMode = false
 
     var body: some View {
         ZStack {
@@ -52,18 +57,40 @@ struct ContentView: View {
 
             // Layout UI elements at top and bottom
             VStack {
-                // MARK: - Top: object history and AI suggestions
+                // MARK: - Top: Mode toggle and AI suggestions
                 VStack(alignment: .center, spacing: 8) {
-                    // Iterate object history (use index as ID to avoid duplicates)
-                    ForEach(Array(arManager.objectHistory.enumerated()), id: \.offset) { index, name in
-                        Text(name.capitalized)
-                            .font(.headline)
-                            .fontWeight(.bold)
+                    // Mode Toggle
+                    HStack(spacing: 12) {
+                        Image(systemName: isObstacleMode ? "eye.trianglebadge.exclamationmark.fill" : "bubble.left.and.bubble.right.fill")
+                            .foregroundColor(isObstacleMode ? .orange : .blue)
+                            .font(.title3)
+                        
+                        Toggle("", isOn: $isObstacleMode)
+                            .labelsHidden()
+                            .toggleStyle(SwitchToggleStyle(tint: .orange))
+                            .frame(width: 51)
+                        
+                        Text(isObstacleMode ? "Obstacle Avoidance" : "Voice Interaction")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
                             .foregroundColor(.white)
-                            .padding(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
-                            .background(Color.black.opacity(0.5))
-                            .cornerRadius(10)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                    .padding(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    .background(Color.black.opacity(0.7))
+                    .cornerRadius(20)
+                    
+                    // Show object history only in Obstacle Mode
+                    if isObstacleMode {
+                        ForEach(Array(arManager.objectHistory.enumerated()), id: \.offset) { index, name in
+                            Text(name.capitalized)
+                                .font(.headline)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                                .padding(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+                                .background(Color.black.opacity(0.5))
+                                .cornerRadius(10)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                     }
                     
                     // VLM response
@@ -108,6 +135,7 @@ struct ContentView: View {
                 .animation(.easeInOut, value: arManager.objectHistory)
                 .animation(.easeInOut, value: showVLMResponse)
                 .animation(.easeInOut, value: speechRecognition.isListening)
+                .animation(.easeInOut, value: isObstacleMode)
                 
                 Spacer()
 
@@ -207,6 +235,9 @@ struct ContentView: View {
                 speechFeedbackTimer = nil
             }
         }
+        .onChange(of: isObstacleMode) { _, newMode in
+            handleModeChange(isObstacleMode: newMode)
+        }
     }
     
     /// Handle distance updates, UI text and haptic feedback in real time.
@@ -218,6 +249,14 @@ struct ContentView: View {
         }
 
         if distance > 0 {
+            // In Voice Interaction Mode: simply show distance without warnings
+            if !isObstacleMode {
+                self.isWarning = false
+                self.distanceString = String(format: "%.2f m", distance)
+                return
+            }
+            
+            // In Obstacle Avoidance Mode: show warnings and haptics
             if distance < warningDistance {
                 // Check cooldown
                 let now = Date()
@@ -235,7 +274,7 @@ struct ContentView: View {
                     provideHapticFeedback(isWarning: true)
                     lastWarningTime = now
                     
-                    // Trigger VLM advice once per warning
+                    // Trigger VLM advice once per warning (only in obstacle mode)
                     if !hasTriggeredVLMForCurrentWarning {
                         hasTriggeredVLMForCurrentWarning = true
                         requestVLMObstacleAvoidance(distance: distance)
@@ -259,9 +298,12 @@ struct ContentView: View {
         }
     }
     
-    /// Speak newly recognized object name with cooldown.
+    /// Speak newly recognized object name with cooldown (only in obstacle mode).
     private func handleObjectNameUpdate(name: String) {
         guard speechFeedbackTimer == nil else { return }
+        
+        // Only speak object names in obstacle mode
+        guard isObstacleMode else { return }
         
         if !name.isEmpty {
             provideSpeechFeedback(objectName: name, distance: arManager.distance)
@@ -281,10 +323,9 @@ struct ContentView: View {
         let utteranceString = "\(objectName.capitalized), \(String(format: "%.1f meters", distance))"
         let utterance = AVSpeechUtterance(string: utteranceString)
         
-        // Natural voice parameters
-        configureNaturalVoice(utterance: utterance)
-        
-        // Playback session switching removed to avoid audio session churn
+        // Set English voice with increased volume
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.volume = 1.0  // Maximum volume for better audibility
         
         // Mark that we are speaking object info now
         isSpeakingObjectName = true
@@ -292,21 +333,43 @@ struct ContentView: View {
         speechSynthesizer.speak(utterance)
     }
 
-    /// Trigger haptics.
+    /// Trigger haptics with enhanced feedback for better awareness.
     private func provideHapticFeedback(isWarning: Bool) {
         guard let engine = hapticEngine, isWarning else { return }
         
-        let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 1.0)
-        let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 1.0)
-        let event = CHHapticEvent(eventType: .hapticTransient, parameters: [intensity, sharpness], relativeTime: 0)
-        
+        // Create very strong, longer haptic pattern with multiple pulses
         do {
-            let pattern = try CHHapticPattern(events: [event], parameters: [])
+            var events: [CHHapticEvent] = []
+            
+            // Create a pattern with 6 strong pulses for maximum noticeability
+            for i in 0..<6 {
+                let intensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 1.0)
+                let sharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 1.0)
+                let event = CHHapticEvent(
+                    eventType: .hapticTransient,
+                    parameters: [intensity, sharpness],
+                    relativeTime: TimeInterval(i) * 0.12  // 120ms apart for rapid, intense feedback
+                )
+                events.append(event)
+            }
+            
+            // Add continuous rumble effect between pulses for extra intensity
+            let continuousIntensity = CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.8)
+            let continuousSharpness = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5)
+            let continuousEvent = CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: [continuousIntensity, continuousSharpness],
+                relativeTime: 0,
+                duration: 0.7  // Duration covers all pulses
+            )
+            events.append(continuousEvent)
+            
+            let pattern = try CHHapticPattern(events: events, parameters: [])
             let player = try engine.makePlayer(with: pattern)
             try player.start(atTime: 0)
         } catch {
-            // Keep minimal logging
-            print("Failed to play haptic pattern: \(error.localizedDescription)")
+            // Silently fail for haptic errors to reduce log noise
+            // Haptic feedback is non-critical
         }
     }
     
@@ -314,8 +377,26 @@ struct ContentView: View {
     private func prepareHaptics() {
         guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
         do {
-            hapticEngine = try CHHapticEngine()
-            try hapticEngine?.start()
+            let engine = try CHHapticEngine()
+            
+            // Handle engine reset (e.g., after audio session interruptions)
+            engine.resetHandler = {
+                print("Haptic engine reset")
+                do {
+                    try engine.start()
+                } catch {
+                    print("Failed to restart haptic engine after reset")
+                }
+            }
+            
+            // Handle engine stopped
+            engine.stoppedHandler = { reason in
+                print("Haptic engine stopped: \(reason.rawValue)")
+            }
+            
+            try engine.start()
+            hapticEngine = engine
+            print("Haptic engine initialized successfully")
         } catch {
             print("Error creating haptic engine: \(error.localizedDescription)")
         }
@@ -450,10 +531,9 @@ struct ContentView: View {
     private func speakText(_ text: String) {
         let utterance = AVSpeechUtterance(string: text)
         
-        // Natural voice parameters
-        configureNaturalVoice(utterance: utterance)
-        
-        // Playback session switching removed to avoid audio session churn
+        // Set English voice with increased volume
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.volume = 1.0  // Maximum volume for better audibility
         
         speechSynthesizer.speak(utterance)
     }
@@ -462,26 +542,100 @@ struct ContentView: View {
     private func speakVLMText(_ text: String) {
         let utterance = AVSpeechUtterance(string: text)
         
-        // Natural voice parameters
-        configureNaturalVoice(utterance: utterance)
-        
-        // Tag this utterance as VLM response for delegate handling
-        utterance.voice = AVSpeechSynthesisVoice(identifier: "com.apple.voice.enhanced.en-US.Allison")
+        // Set English voice with increased volume
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.volume = 1.0  // Maximum volume for better audibility
         
         speechSynthesizer.speak(utterance)
     }
     
-    /// Configure natural-sounding voice parameters
-    private func configureNaturalVoice(utterance: AVSpeechUtterance) {
-        // Use Allison (Enhanced) voice
-        utterance.voice = AVSpeechSynthesisVoice(identifier: "com.apple.voice.enhanced.en-US.Allison")
+    // MARK: - Mode Management
+    
+    /// Handle mode change between obstacle avoidance and voice interaction
+    private func handleModeChange(isObstacleMode: Bool) {
+        print("Mode changed to: \(isObstacleMode ? "Obstacle Avoidance" : "Voice Interaction")")
         
-        // Tune speech parameters
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.92
-        utterance.pitchMultiplier = 1.05
-        utterance.volume = 1.0
-        utterance.preUtteranceDelay = 0.15
-        utterance.postUtteranceDelay = 0.1
+        // Stop any ongoing speech
+        if speechSynthesizer.isSpeaking {
+            speechSynthesizer.stopSpeaking(at: .immediate)
+        }
+        
+        // Clear VLM response display
+        withAnimation {
+            showVLMResponse = false
+            vlmResponse = ""
+            isSpeakingVLMResponse = false
+        }
+        
+        if isObstacleMode {
+            // Switched to obstacle avoidance mode
+            hasDescribedEnvironmentInVoiceMode = false
+            // Reset VLM processing flag to ensure clean state
+            isProcessingVLM = false
+            speakText("Obstacle avoidance mode activated")
+            
+        } else {
+            // Switched to voice interaction mode
+            speakText("Voice interaction mode activated")
+            
+            // Reset flag to allow environment description
+            hasDescribedEnvironmentInVoiceMode = false
+            
+            // Wait for any ongoing VLM processing to complete before describing environment
+            if isProcessingVLM {
+                print("Waiting for VLM processing to complete before environment description")
+                // Schedule retry after a short delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    if !self.isObstacleMode {  // Still in voice mode
+                        self.describeEnvironmentForVoiceMode()
+                    }
+                }
+            } else {
+                // Automatically describe environment when entering voice interaction mode
+                describeEnvironmentForVoiceMode()
+            }
+        }
+    }
+    
+    /// Describe the current environment when entering voice interaction mode
+    private func describeEnvironmentForVoiceMode() {
+        // Prevent duplicate descriptions
+        guard !hasDescribedEnvironmentInVoiceMode else { return }
+        
+        guard let currentImage = arManager.currentFrameImage else {
+            print("No image available for environment description")
+            return
+        }
+        
+        // Prevent duplicate processing
+        guard !isProcessingVLM else {
+            print("VLM is processing; skip environment description")
+            return
+        }
+        
+        isProcessingVLM = true
+        hasDescribedEnvironmentInVoiceMode = true
+        
+        // Small delay to allow mode switch speech to complete
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            VLMService.shared.describeEnvironment(image: currentImage) { result in
+                DispatchQueue.main.async {
+                    self.isProcessingVLM = false
+                    
+                    switch result {
+                    case .success(let description):
+                        self.vlmResponse = description
+                        self.showVLMResponse = true
+                        self.isSpeakingVLMResponse = true
+                        self.speakVLMText(description)
+                        
+                    case .failure(let error):
+                        print("Environment description failed: \(error.localizedDescription)")
+                        self.speakText("Unable to describe environment")
+                    }
+                }
+            }
+        }
     }
     
     // Playback session switching removed to avoid audio session churn
